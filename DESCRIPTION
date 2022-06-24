@@ -1,0 +1,31 @@
+Package: CalciumSpikes
+Title: Statistical modelling of Ca^2+ oscillations
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Jake",
+           family = "Powell",
+           role = c("aut", "cre"),
+           email = "Jake.Powell@nottingham.ac.uk",
+           comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: Tools for fitting inhomogeneous ISI distributions for Ca^2+ spike sequences.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.2
+Imports: 
+    base,
+    stats,
+    shiny,
+    shinyjs,
+    shinythemes,
+    pracma,
+    mvtnorm,
+    fANCOVA
+Suggests: 
+    knitr,
+    rmarkdown,
+    testthat
+VignetteBuilder: knitr
+URL: https://github.com/JPNotts/CalciumSpikes
+BugReports: https://github.com/JPNotts/CalciumSpikes/issues

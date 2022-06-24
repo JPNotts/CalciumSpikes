@@ -1,0 +1,283 @@
+# QQ + KS plot stuff
+
+#' A function to calclate q(t), the conditional intensity function.
+#'
+#' @param int.fn int.fn
+#' @param end.time end.time
+#' @param spike.times spike.times
+#' @param ISI.type ISI.type
+#' @param hyper hyper.param
+#' @param t.min t.min
+#' @param do.log do.log
+#'
+#' @return the conditional intensity function
+#' @export
+#'
+q.t <- function(int.fn, end.time, spike.times, ISI.type, hyper,t.min = 0, do.log = TRUE){
+  steps <- length(int.fn)-1
+  time.step <- end.time / steps
+
+  # Calculate X, the integrated intensity function
+  x <- inc.fineness(int.fn,4)
+  X <- cumsum(x)*(end.time/(length(x)-1))
+
+  # A vector to store the q.t.
+  q <- rep(NA, steps + 1)
+
+  spike.on.grid <- (spike.times%/%time.step)*time.step
+  if(do.log == TRUE){
+    for( i in 1:(steps+1) ) {
+
+      t <- (i-1)*time.step
+      if (any( abs(c(0,(spike.on.grid))-t)  < 1e-7 )){
+        q[i] <- 0
+        integral <- 0
+        last.spike <- t
+      }
+      else{
+        prob.cur <- exp(PDF_tmin(t,last.spike, hyper, end.time, x, X, ISI.type, t.min, do.log = T))
+        # if(is.na(prob.cur)){stop('PDF nan')}
+        integral <- integral + prob.cur * time.step
+        q[i] <- prob.cur / ( 1 - integral)
+         # cat('i = ',i,', prob.cur = ',prob.cur, ' and integral = ', integral,' giving q[i] =',q[i],'. \n')
+
+      }
+
+    }
+  }
+  else{
+    for( i in 1:(steps+1) ) {
+      # print(t)
+      t <- (i-1)*time.step
+      if (any( abs(c(0,(spike.on.grid))-t)  < 1e-7 )){
+        q[i] <- 0
+        integral <- 0
+        last.spike <- t
+      }
+      else{
+        prob.cur <- PDF_tmin(t,last.spike, hyper, end.time, x, X, ISI.type, t.min, do.log = F)
+        integral <- integral + prob.cur * time.step
+        # print(integral)
+        q[i] <- prob.cur / ( 1 - integral)
+      }
+
+    }
+  }
+
+  return(q)
+}
+
+#' A function that returns R(t), the integrated conditional intensity function.
+#'
+#' @param q the conditional intensity function
+#' @param time.step time.step of the conditional intensity function.
+#'
+#' @return the integrated intensity function
+#' @export
+#'
+R.t <- function(q, time.step){
+  return(cumsum(q)*time.step)
+}
+
+#' A function that returns the rescaled ISI times.
+#'
+#' @param R.t R.t
+#' @param spike.times spike.times
+#' @param end.time end.time
+#'
+#' @return rescaled ISI
+#' @export
+#'
+get.tau <- function(R.t, spike.times,end.time){
+  time.step <- end.time/(length(R.t)-1)
+  spike.index <- spike.times / time.step
+
+  if(length(which(spike.index<1)) == 1){
+    spike.index[1] = 1
+    warning('First spike occurs at time before first grid value, thus we set spike.index[1]=1.')
+  }
+  if(length(which(spike.index<1)) > 1){
+    warning('Spikes occur at same time grid, need finer grid.')
+  }
+
+  tau <- rep(NA, length(spike.index)-1)
+  for( i in 1:(length(spike.index)-1)){
+    tau[i] <- R.t[spike.index[i+1]] - R.t[spike.index[i]]
+  }
+
+  return(tau)
+
+}
+
+#' A function that gets the qunatiles for the possion process of unit rate.
+#'
+#' @param N  N
+model.quantiles <- function(N){
+  s.k <- ( (1:N)-0.5 )/N
+  t.k <- - log(1-s.k)
+  return(t.k)
+}
+
+
+#' A function to increase the fineness of the intensity function, by a factor of the user's choice.
+#'
+#' @param int.fn int.fn
+#' @param factor factor
+inc.fineness <- function(int.fn, factor){
+  new.length <- length(int.fn) + (length(int.fn)-1)*(factor-1)
+  output <- rep(NA, new.length )
+
+  new.pos <- seq(1,new.length,factor)
+  output[new.pos]<- int.fn
+
+  for ( i in 1:(length(int.fn)-1)){
+    for (j in 1:(factor-1)){
+      output[new.pos[i]+j] <- int.fn[i] + (j/factor) *(int.fn[i+1]-int.fn[i])
+    }
+  }
+
+  return(output)
+}
+
+
+#' A function to get the quantiles given spikes and intensity function.
+#'
+#' @param int.fn int.fn
+#' @param end.time end.time
+#' @param spike.times spike.times
+#' @param ISI.type ISI.type
+#' @param hyper.param hyper.param
+#' @param t.min t.min
+#' @param do.log do.log
+ #' @param sort flag for sorting quantiles
+#'
+#' @return experimental quantiles
+#'
+exper.quantiles <- function(int.fn, end.time, spike.times, ISI.type, hyper.param, t.min = 0, do.log = FALSE,sort=F){
+  q <- q.t(int.fn = int.fn, end.time=end.time, spike.times=spike.times, ISI.type=ISI.type, hyper =hyper.param, t.min = t.min, do.log=do.log)
+  q[which(q<0)] =0 #Note by definition q should be positive, therefor set numerical negative values to zero.
+  time.step <- end.time/(length(int.fn)-1)
+  R <- R.t(q, time.step)
+  tau <- get.tau(R, spike.times, end.time)
+  if(sort){
+    return(sort(tau))
+  }else{
+    return(tau)
+  }
+
+
+}
+
+
+#' Get the QQ and KS quantiles
+#'
+#' @param spikes.df The calcium spike sequences used to fit the model (a data frame where each column consists of a single spike sequence).
+#' @param int.fn The intensity function
+#' @param end.time The length of the experiment
+#' @param ISI.type The inhomogeneous ISI distribution. Either 'Exponential', 'Gamma', 'InverseGaussian', 'LogNormal' or 'Weibull'.
+#' @param hyper.param The ISI parameter
+#' @param t.min the refractory period
+#' @param rm.last.spike Flag for do we remove the last spike time (it may correspond to the end.time)
+#' @param do.log Flag for do we calculate on the logarithmic scale
+#'
+#' @return QQ and KS quantiles
+#' @export
+#'
+QQ_KS_data <- function(spikes.df, int.fn, end.time, ISI.type, hyper.param, t.min = 0, rm.last.spike = TRUE, do.log = TRUE){
+  no.seq <- ncol(spikes.df)
+  # Create vector to store the experimental quantiles, model quantiles, and s.k.
+  all.s.k <- numeric()
+  all.exper.quant <- numeric()
+  all.model.quant <- numeric()
+
+  all.s.k <- matrix(NA, ncol=no.seq, nrow=nrow(spikes.df)-1)
+  all.exper.quant <- all.s.k
+  all.model.quant <-  all.s.k
+
+  if(length(t.min)==1){
+    t.min <- rep(t.min,no.seq)
+  }
+  if(length(hyper.param)==1){
+    hyper.param <- rep(hyper.param,no.seq)
+  }
+
+  # Iterate through all the spike sequences.
+  for(i in 1:no.seq){
+    # Get the current spike.
+    spikes <- spikes.df[,i]
+    spikes <- spikes[!is.na(spikes)]
+    if(rm.last.spike == TRUE){
+      spikes <- spikes[-length(spikes)]
+    }
+    N <- length(spikes) - 1
+    # if(i==2){
+    #   print(end.time[i]) ; print(spikes); print(ISI.type); print(hyper.param[i]) ; print(t.min[i]) ; print(do.log) ; plot(int.fn[i,],type='l')
+    # }
+    exper.quant <- exper.quantiles(int.fn[i,], end.time[i],spikes, ISI.type, hyper.param[i],t.min[i], do.log = do.log)
+    # if(any(exper.quant < -1000)){browser()}
+    all.exper.quant[1:length(exper.quant),i] <- exper.quant
+
+    all.model.quant[1:N,i] <- model.quantiles(N)
+
+    s.k <- ( (1:N)-0.5 )/N
+    all.s.k[1:N,i] <-  s.k
+
+    if(length(exper.quant) != length(s.k)) warning(paste0('Warning! length exper does not match model for seq ',i,'. Exper = ',length(exper.quant), 'and Model = ',length(s.k)))
+    # print(i)
+    # cat('exper length =', length(exper.quant), ' and model = ', length( model.quantiles(N)))
+    # print('===============================')
+
+  }
+
+  output <- list(s.k = all.s.k, model = all.model.quant, exper = all.exper.quant)
+
+  return(output)
+  }
+
+#' A function that returns the slopes of the individual spike cell data of QQ and KS plots.
+#'
+#' @param data The QQ and KS quantiles obtained from `QQ_KS_data`
+#' @param spikes  The calcium spike sequences used to fit the model (a data frame where each column consists of a single spike sequence).
+#'
+#' @return slopes of the QQ and KS plots.
+#' @export
+#'
+get_slopes <- function(data, spikes){
+  all.model.quant <- data$model
+  all.exper.quant <- data$exper
+  all.s.k <- data$s.k
+
+  # Firstly we need to calculate pos to work out what values belongs to each cell.
+  slopes.QQ <- NULL
+  slopes.KS <- NULL
+  for (i in 1:ncol(spikes)){
+    current <- spikes[,i]
+
+    # Get the correspoinding values from quantiles.
+    # exper.cur <- all.exper.quant[start:(start+length.for.cell-1)]
+    # model.cur <- all.model.quant[start:(start+length.for.cell-1)]
+    # s.k.cur <- all.s.k[start:(start+length.for.cell-1)]
+
+    exper.cur <- all.exper.quant[,i][!is.na(all.exper.quant[,i])]
+    model.cur <- all.model.quant[,i][!is.na(all.model.quant[,i])]
+    s.k.cur <- all.s.k[,i][!is.na(all.s.k[,i])]
+
+    # Get QQ values.
+    # Use lm to get the slope.
+    regressionQQ <- stats::lm(model.cur ~ sort(exper.cur))
+    slopes.QQ <- c(slopes.QQ, regressionQQ$coefficients[[2]])
+    #
+    # regress <- stats::lm( exper.cur ~ model.cur)
+    # slope.cur <- max(regress$coefficients[[2]], 1/regress$coefficients[[2]])
+    # slopes.QQ <- c(slopes.QQ, slope.cur)
+
+
+    # Get KS values.
+    u.k.cur <- 1 - exp(-exper.cur)
+    regressionKS <- stats::lm(s.k.cur ~ sort(u.k.cur))
+    slopes.KS <- c(slopes.KS, regressionKS$coefficients[[2]])
+
+  }
+
+  return(list(QQ = slopes.QQ, KS = slopes.KS))
+}
